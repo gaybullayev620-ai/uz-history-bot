@@ -1,3 +1,0 @@
-requests
-edge-tts
-moviepy>=2.0
