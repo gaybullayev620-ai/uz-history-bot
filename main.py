@@ -28,18 +28,17 @@ r.raise_for_status()
 data = json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
 print("Mavzu:", data["topic"])
 
-# 2) Pexels video
+# 2) Pixabay video
 def pexels(q, i):
-    res = requests.get("https://api.pexels.com/videos/search",
-        headers={"Authorization": E["PEXELS_API_KEY"]},
-        params={"query": q, "orientation": "portrait", "per_page": 5}, timeout=60).json()
-    vids = res.get("videos") or requests.get("https://api.pexels.com/videos/search",
-        headers={"Authorization": E["PEXELS_API_KEY"]},
-        params={"query": "ancient architecture", "orientation": "portrait", "per_page": 5}, timeout=60).json()["videos"]
-    files = sorted(vids[i % len(vids)]["video_files"], key=lambda f: f["width"])
-    f = next((x for x in files if x["width"] >= 720), files[-1])
+    key = E["PEXELS_API_KEY"]
+    def search(query):
+        return requests.get("https://pixabay.com/api/videos/",
+            params={"key": key, "q": query, "per_page": 10}, timeout=60).json().get("hits", [])
+    hits = search(q) or search("ancient architecture")
+    h = hits[i % len(hits)]["videos"]
+    link = (h.get("medium") or h["small"])["url"]
     path = f"out/v{i}.mp4"
-    open(path, "wb").write(requests.get(f["link"], timeout=120).content)
+    open(path, "wb").write(requests.get(link, timeout=120).content)
     return path
 
 # 3) Ovoz + klip har bir gap uchun
