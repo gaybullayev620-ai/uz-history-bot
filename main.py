@@ -237,9 +237,9 @@ VIDEO QIDIRUV SO'ZLARI QOIDALARI (juda muhim):
 - Har sahnada ovoz nima haqida gapirayotgan bo'lsa,
   video aynan shuni ko'rsatsin.
 - Birinchi keyword: sahnadagi asosiy ko'rinadigan narsa,
-  1-2 so'z (masalan: "shark", "human brain", "pyramid").
-- Mavzu akula bo'lsa, har sahnada keywords ichida
-  "shark" bo'lsin. Boshqa mavzularda ham shunday.
+  1-2 so'z (masalan: "human brain", "pyramid", "gold coins").
+- Har sahnada keywords ichida shu sahnaning asosiy
+  narsasi nomi bo'lsin (mavzu nima haqida bo'lsa, o'sha narsa).
 - Mavhum so'z ishlatma (fact, history, secret, idea, mystery).
 - Faqat ko'z bilan ko'rinadigan narsalarni yoz.
 - Har sahnaga 3 ta keyword ber, eng aniqdan umumiyga qarab.
@@ -247,7 +247,7 @@ VIDEO QIDIRUV SO'ZLARI QOIDALARI (juda muhim):
 RASM TA'RIFI QOIDALARI (juda muhim):
 - Har sahnaga "image_prompt" yoz: ingliz tilida, 1-2 gap.
 - Sahnada ovoz gapirayotgan narsani aniq ko'rsat
-  (masalan: "a great white shark swimming in deep blue ocean").
+  (masalan: "an ancient stone pyramid at sunset, golden light").
 - Qayerda, qanday yorug'lik, qanday kayfiyat ekanini yoz.
 - Rasmda yozuv, harf, raqam bo'lmasin.
 - Odamning yaqin yuzini chizma. Hayvon, narsa, manzara,
@@ -951,7 +951,14 @@ def generate_ai_image(prompt, scene_number):
     """
     global CF_DISABLED
 
-    if CF_DISABLED or not CF_TOKEN or not CF_ACCOUNT:
+    if not CF_TOKEN or not CF_ACCOUNT:
+        print(
+            "Cloudflare kalitlari topilmadi "
+            "(CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)."
+        )
+        return None
+
+    if CF_DISABLED:
         return None
 
     prompt = str(prompt or "").strip()
@@ -1299,7 +1306,11 @@ def main():
     print("Video:", VIDEO_PATH)
     print("Manbalar:", SOURCES_PATH)
     print("Ssenariy:", SCRIPT_PATH)
-    post_to_instagram(VIDEO_PATH, data)
+
+    if os.getenv("DRY_RUN", "").strip().lower() == "true":
+        print("\nSINOV REJIMI: Instagram'ga joylash o'tkazib yuborildi.")
+    else:
+        post_to_instagram(VIDEO_PATH, data)
 
 
 # =========================================================
