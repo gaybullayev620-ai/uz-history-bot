@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import base64
 import json
 import time
 import random
@@ -68,6 +69,22 @@ GEMINI_BASE = (
 )
 
 PIXABAY_URL = "https://pixabay.com/api/videos/"
+
+# Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
+# Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
+CF_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
+CF_ACCOUNT = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+
+CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+
+IMAGE_STYLE = (
+    "photorealistic, cinematic lighting, highly detailed, "
+    "vertical composition, no text, no letters, no watermark"
+)
+
+# Cloudflare limiti tugasa yoki token xato bo'lsa, qolgan sahnalarda
+# qayta urinmaslik uchun o'chirib qo'yiladi.
+CF_DISABLED = False
 
 # Ssenariydagi sahnalarning asosiy ko'rinadigan so'zlari.
 # main() ichida to'ldiriladi, video topilmaganda zaxira sifatida ishlatiladi.
@@ -227,6 +244,17 @@ VIDEO QIDIRUV SO'ZLARI QOIDALARI (juda muhim):
 - Faqat ko'z bilan ko'rinadigan narsalarni yoz.
 - Har sahnaga 3 ta keyword ber, eng aniqdan umumiyga qarab.
 
+RASM TA'RIFI QOIDALARI (juda muhim):
+- Har sahnaga "image_prompt" yoz: ingliz tilida, 1-2 gap.
+- Sahnada ovoz gapirayotgan narsani aniq ko'rsat
+  (masalan: "a great white shark swimming in deep blue ocean").
+- Qayerda, qanday yorug'lik, qanday kayfiyat ekanini yoz.
+- Rasmda yozuv, harf, raqam bo'lmasin.
+- Odamning yaqin yuzini chizma. Hayvon, narsa, manzara,
+  koinot, bino, qo'l yoki orqadan ko'rinish afzal.
+- Tarixiy shaxs bo'lsa, uning davri manzarasi, qal'a,
+  qurol-yarog' yoki otliqlarni orqadan chiz.
+
 AVVAL ISHLATILGAN MAVZULAR (takrorlama):
 {previous_text}
 
@@ -239,6 +267,7 @@ JSON FORMAT:
   "scenes": [
     {{
       "text": "Ovoz uchun o'zbekcha matn",
+      "image_prompt": "detailed English visual description of this scene",
       "keywords": [
         "main visible subject",
         "related visual",
@@ -352,6 +381,11 @@ def generate_script():
 
                 if not scene.get("keywords"):
                     scene["keywords"] = ["nature", "science"]
+
+                if not scene.get("image_prompt"):
+                    scene["image_prompt"] = str(
+                        scene["keywords"][0]
+                    )
 
             print("Mavzu:", data["topic"])
 
@@ -907,6 +941,134 @@ def prepare_video(path, duration):
 
 
 # =========================================================
+# 8b. AI RASM (CLOUDFLARE) VA HARAKAT EFFEKTI
+# =========================================================
+
+def generate_ai_image(prompt, scene_number):
+    """
+    Cloudflare FLUX bilan rasm yaratadi.
+    Muvaffaqiyatli bo'lsa fayl yo'lini, aks holda None qaytaradi.
+    """
+    global CF_DISABLED
+
+    if CF_DISABLED or not CF_TOKEN or not CF_ACCOUNT:
+        return None
+
+    prompt = str(prompt or "").strip()
+
+    if not prompt:
+        return None
+
+    full_prompt = f"{prompt}, {IMAGE_STYLE}"[:2000]
+
+    url = (
+        "https://api.cloudflare.com/client/v4/accounts/"
+        f"{CF_ACCOUNT}/ai/run/{CF_MODEL}"
+    )
+
+    try:
+        response = request_retry(
+            "POST",
+            url,
+            tries=2,
+            headers={
+                "Authorization": f"Bearer {CF_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"prompt": full_prompt},
+            timeout=(20, 120)
+        )
+
+        try:
+            if response.status_code in (401, 403, 429):
+                CF_DISABLED = True
+                print(
+                    f"Cloudflare HTTP {response.status_code}: "
+                    f"{response.text[:200]}"
+                )
+                print("Cloudflare o'chirildi, Pixabay ishlatiladi.")
+                return None
+
+            if not response.ok:
+                print(
+                    f"Cloudflare HTTP {response.status_code}: "
+                    f"{response.text[:200]}"
+                )
+                return None
+
+            payload = response.json()
+
+        finally:
+            response.close()
+
+        result = payload.get("result", payload)
+        image_b64 = (
+            result.get("image")
+            if isinstance(result, dict)
+            else None
+        )
+
+        if not image_b64:
+            print(f"Cloudflare rasm qaytarmadi: {str(payload)[:200]}")
+            return None
+
+        path = os.path.join(
+            TEMP,
+            f"image_{scene_number}.jpg"
+        )
+
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(image_b64))
+
+        # Rasm buzilmaganini tekshirish
+        with Image.open(path) as check:
+            check.verify()
+
+        print(f"AI rasm tayyor: sahna {scene_number}")
+
+        time.sleep(1)
+
+        return path
+
+    except Exception as error:
+        print(f"AI rasm xatosi: {error}")
+        return None
+
+
+def make_image_clip(path, duration, index):
+    """Rasmni sekin yaqinlashtirib/uzoqlashtirib video qiladi."""
+    img = Image.open(path).convert("RGB")
+
+    scale = max(W / img.width, H / img.height)
+
+    img = img.resize(
+        (
+            int(img.width * scale) + 2,
+            int(img.height * scale) + 2
+        ),
+        Image.LANCZOS
+    )
+
+    duration = max(float(duration), 0.1)
+
+    base = ImageClip(np.array(img)).with_duration(duration)
+
+    if index % 2 == 0:
+        def zoom(t):
+            return 1.0 + 0.14 * (t / duration)
+    else:
+        def zoom(t):
+            return 1.14 - 0.14 * (t / duration)
+
+    moving = base.resized(zoom).with_position("center")
+
+    return CompositeVideoClip(
+        [moving],
+        size=(W, H)
+    ).with_duration(duration)
+
+
+# =========================================================
 # 9. SAHNA YARATISH
 # =========================================================
 
@@ -917,11 +1079,6 @@ def build_scene(scene, index, total):
 
     text = scene["text"]
     keywords = scene["keywords"]
-
-    video_path, source_url = get_video(
-        keywords,
-        index + 1
-    )
 
     audio_path = os.path.join(
         TEMP,
@@ -936,10 +1093,38 @@ def build_scene(scene, index, total):
     audio = AudioFileClip(audio_path)
     duration = audio.duration
 
-    video = prepare_video(
-        video_path,
-        duration
+    video = None
+    source_url = None
+
+    # 1) Asosiy usul: AI rasm + harakat effekti
+    image_path = generate_ai_image(
+        scene.get("image_prompt"),
+        index + 1
     )
+
+    if image_path:
+        try:
+            video = make_image_clip(
+                image_path,
+                duration,
+                index
+            )
+            source_url = "AI rasm (Cloudflare FLUX.1 schnell)"
+        except Exception as error:
+            print(f"Rasm effekti xatosi: {error}")
+            video = None
+
+    # 2) Zaxira: Pixabay videosi
+    if video is None:
+        video_path, source_url = get_video(
+            keywords,
+            index + 1
+        )
+
+        video = prepare_video(
+            video_path,
+            duration
+        )
 
     overlay = make_overlay(
         text,
@@ -982,7 +1167,7 @@ def save_sources(data, video_sources):
         f"Mavzu: {data['topic']}",
         f"Sarlavha: {data.get('title', '')}",
         "",
-        "PIXABAY VIDEOLARI:"
+        "VIDEO / RASM MANBALARI:"
     ]
 
     for index, url in enumerate(
@@ -1114,10 +1299,7 @@ def main():
     print("Video:", VIDEO_PATH)
     print("Manbalar:", SOURCES_PATH)
     print("Ssenariy:", SCRIPT_PATH)
-    if os.getenv("DRY_RUN", "").lower() == "true":
-        print("\nSINOV REJIMI: Instagram'ga joylash o'tkazib yuborildi.")
-    else:
-        post_to_instagram(VIDEO_PATH, data)
+    post_to_instagram(VIDEO_PATH, data)
 
 
 # =========================================================
