@@ -1,4 +1,3 @@
-
 import os
 import json
 import math
@@ -31,7 +30,7 @@ USED_FILE = "used_topics.json"
 os.makedirs(OUT, exist_ok=True)
 
 GEMINI_KEY = E["GEMINI_API_KEY"]
-PEXELS_KEY = E["PEXELS_API_KEY"]
+PEXELS_KEY = E["PEXELS_API_KEY"]  # ichida Pixabay kaliti turadi
 TG_TOKEN = E["TELEGRAM_BOT_TOKEN"]
 TG_CHAT = E["TELEGRAM_CHAT_ID"]
 
@@ -146,9 +145,10 @@ Return ONLY valid JSON:
 
 def generate_script():
     models = [
-                "gemini-3.7-flash",
+        "gemini-3.7-flash",
         "gemini-3.6-flash",
-        "gemini-3.5-flash"
+        "gemini-3.5-flash",
+        "gemini-flash-latest"
     ]
 
     for model in models:
@@ -169,22 +169,24 @@ def generate_script():
             )
 
             if not response.ok:
-                print(model, response.status_code)
+                print(model, response.status_code, response.text[:300])
                 continue
 
             raw = response.json()["candidates"][0]["content"]["parts"][0]["text"]
             result = json.loads(raw)
 
             if len(result["sentences"]) < 6:
+                print(model, "juda kam gap qaytardi")
                 continue
 
             if not result.get("sources"):
+                print(model, "manbalar yo'q")
                 continue
 
             return result
 
         except Exception as error:
-            print("Gemini error:", error)
+            print("Gemini error:", model, error)
 
     raise RuntimeError("Gemini ssenariy yarata olmadi")
 
