@@ -14,6 +14,7 @@ import numpy as np
 import edge_tts
 
 from PIL import Image, ImageDraw, ImageFont
+
 from moviepy import (
     VideoFileClip,
     AudioFileClip,
@@ -25,81 +26,53 @@ from moviepy import (
 
 
 # =========================================================
-# 1. ASOSIY SOZLAMALAR
+# 1. SOZLAMALAR
 # =========================================================
 
-W = 1080
-H = 1920
+W, H = 1080, 1920
 FPS = 30
 
 VOICE = "uz-UZ-SardorNeural"
 VOICE_RATE = "+5%"
 
-VIDEO_DURATION_TARGET = 40
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE_DIR, "output")
 TEMP = os.path.join(OUT, "temp")
-DATA_DIR = os.path.join(BASE_DIR, "data")
 
 VIDEO_PATH = os.path.join(OUT, "reels.mp4")
-USED_TOPICS_FILE = os.path.join(DATA_DIR, "used_topics.json")
+SOURCES_PATH = os.path.join(OUT, "sources.txt")
+SCRIPT_PATH = os.path.join(OUT, "script.json")
+USED_TOPICS_PATH = os.path.join(OUT, "used_topics.json")
 
 os.makedirs(OUT, exist_ok=True)
 os.makedirs(TEMP, exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
 
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+PIXABAY_KEY = os.getenv("PIXABAY_API_KEY")
 
-# =========================================================
-# 2. GITHUB SECRETS
-# =========================================================
+if not GEMINI_KEY:
+    raise RuntimeError("GEMINI_API_KEY topilmadi!")
 
-def need(name):
-    value = os.getenv(name)
-
-    if not value:
-        raise RuntimeError(
-            f"GitHub Secrets ichida {name} topilmadi!"
-        )
-
-    return value.strip()
-
-
-GEMINI_KEY = need("GEMINI_API_KEY")
-PIXABAY_KEY = need("PIXABAY_API_KEY")
-TG_TOKEN = need("TELEGRAM_BOT_TOKEN")
-TG_CHAT = need("TELEGRAM_CHAT_ID")
-
-
-# =========================================================
-# 3. API MANZILLARI VA MODELLAR
-# =========================================================
+if not PIXABAY_KEY:
+    raise RuntimeError("PIXABAY_API_KEY topilmadi!")
 
 GEMINI_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
 ]
 
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_BASE = (
+    "https://generativelanguage.googleapis.com/v1beta/models"
+)
 
 PIXABAY_URL = "https://pixabay.com/api/videos/"
 
-TELEGRAM_URL = (
-    f"https://api.telegram.org/bot{TG_TOKEN}"
-)
-
 
 # =========================================================
-# 4. HTTP SO'ROVLAR
+# 2. HTTP SO'ROVLAR
 # =========================================================
 
-def http_retry(
-    method,
-    url,
-    tries=4,
-    backoff=3,
-    **kwargs
-):
+def request_retry(method, url, tries=4, **kwargs):
     last_error = None
 
     for attempt in range(tries):
@@ -113,13 +86,10 @@ def http_retry(
             if response.status_code in (
                 429, 500, 502, 503, 504
             ):
-                response.close()
-
                 if attempt < tries - 1:
-                    wait = backoff * (attempt + 1)
-                    print(
-                        f"  Server band. {wait} soniya kutamiz..."
-                    )
+                    response.close()
+                    wait = 3 * (attempt + 1)
+                    print(f"Server band. {wait}s kutamiz...")
                     time.sleep(wait)
                     continue
 
@@ -129,109 +99,116 @@ def http_retry(
             last_error = error
 
             if attempt < tries - 1:
-                time.sleep(backoff * (attempt + 1))
+                time.sleep(3 * (attempt + 1))
 
     raise RuntimeError(
-        f"Internet/API xatosi: {last_error}"
+        f"So'rov bajarilmadi: {last_error}"
     )
 
 
 # =========================================================
-# 5. ISHLATILGAN MAVZULAR
+# 3. ISHLATILGAN MAVZULAR
 # =========================================================
 
 def load_used_topics():
-    if not os.path.exists(USED_TOPICS_FILE):
+    if not os.path.exists(USED_TOPICS_PATH):
         return []
 
     try:
         with open(
-            USED_TOPICS_FILE,
+            USED_TOPICS_PATH,
             "r",
             encoding="utf-8"
-        ) as file:
-            return json.load(file)
+        ) as f:
+            return json.load(f)
 
     except Exception:
         return []
 
 
-def save_used_topic(topic):
+def save_topic(topic):
     topics = load_used_topics()
-
     topics.append(topic)
-    topics = topics[-100:]
 
     with open(
-        USED_TOPICS_FILE,
+        USED_TOPICS_PATH,
         "w",
         encoding="utf-8"
-    ) as file:
+    ) as f:
         json.dump(
-            topics,
-            file,
+            topics[-100:],
+            f,
             ensure_ascii=False,
             indent=2
         )
 
 
 # =========================================================
-# 6. GEMINI ORQALI MAVZU VA SSENARIY YARATISH
+# 4. GEMINI SSENARIY
 # =========================================================
 
 def build_prompt():
-    old_topics = load_used_topics()
+    previous = load_used_topics()
 
-    previous = "\n".join(
-        f"- {topic}" for topic in old_topics[-30:]
+    previous_text = "\n".join(
+        f"- {x}" for x in previous[-30:]
     )
 
     return f"""
-Sen professional o'zbekcha Instagram Reels ssenariy muallifisan.
+Sen professional Instagram Reels ssenariy muallifisan.
 
-Vazifang:
-1. Odamlarni hayratga soladigan, qiziqarli va HAQIQIY fakt tanla.
-2. Mavzu avvalgi mavzularga o'xshamasin.
-3. 35-45 soniyalik o'zbekcha video ssenariysi yoz.
-4. Birinchi jumla kuchli HOOK bo'lsin.
-5. Matn sodda, ravon va tabiiy o'zbek tilida bo'lsin.
-6. Har bir sahna uchun Pixabay'dan video topishga mos inglizcha kalit so'zlar yoz.
-7. Faktlarni to'qib chiqarma. Ishonchli, ma'lum faktlardan foydalan.
+AUDITORIYA:
+O'zbek tilida gaplashadigan, qiziqarli faktlar,
+ilm-fan, tarix, tabiat va koinotga qiziquvchi odamlar.
 
-Avval ishlatilgan mavzular:
-{previous}
+VAZIFA:
+Har safar yangi, hayratlanarli va tekshiriladigan
+haqiqiy fakt asosida 35-45 soniyalik video ssenariysi yarat.
 
-Javob FAQAT quyidagi JSON formatida bo'lsin:
+PROFESSIONAL USLUB:
+- Birinchi 2 soniyada kuchli HOOK.
+- Tomoshabinda savol va qiziqish uyg'ot.
+- Keraksiz kirish va salomlashish bo'lmasin.
+- Har bir gap keyingi sahnani ko'rishga undasin.
+- Matn tabiiy, sodda va ravon o'zbek tilida bo'lsin.
+- Oxirida qisqa, esda qoladigan yakun bo'lsin.
+- Soxta fakt, yolg'on statistika va uydirma manba ishlatma.
 
+AVVAL ISHLATILGAN MAVZULAR:
+{previous_text}
+
+JSON FORMAT:
 {{
   "topic": "Mavzu nomi",
-  "title": "Videoning qisqa sarlavhasi",
+  "title": "Qisqa va qiziqarli sarlavha",
+  "hook": "Videoning birinchi jumlasi",
   "category": "science",
   "scenes": [
     {{
-      "text": "O'zbekcha ovoz uchun matn.",
+      "text": "Ovoz uchun o'zbekcha matn",
       "keywords": [
-        "deep ocean",
-        "underwater animals"
+        "english video search keyword",
+        "another english keyword"
       ]
     }}
   ],
   "sources": [
-    "Faktni tekshirish uchun manba nomi yoki URL"
+    "Faktni tekshirish uchun haqiqiy manba nomi yoki URL"
   ]
 }}
 
-Talablar:
+TALABLAR:
 - 6 ta sahna yarat.
-- Har bir sahnada 1-2 ta qisqa gap bo'lsin.
 - Umumiy matn 35-45 soniyaga mos bo'lsin.
-- keywords ingliz tilida bo'lsin.
-- Har bir sahna uchun 2-3 ta qidiruv so'zi ber.
-- JSON'dan tashqari izoh yozma.
+- Birinchi sahna eng kuchli hook bo'lsin.
+- Har bir sahna 1-2 qisqa gapdan iborat bo'lsin.
+- Keywords ingliz tilida bo'lsin.
+- Har sahnaga 2-3 ta aniq qidiruv iborasi ber.
+- JSON'dan tashqari hech qanday izoh yozma.
 """
 
 
-def extract_json(text):
+def parse_json(text):
     text = text.strip()
 
     text = re.sub(
@@ -246,10 +223,8 @@ def extract_json(text):
     start = text.find("{")
     end = text.rfind("}")
 
-    if start == -1 or end == -1:
-        raise RuntimeError(
-            "Gemini JSON formatida javob bermadi."
-        )
+    if start < 0 or end < 0:
+        raise RuntimeError("Gemini JSON qaytarmadi.")
 
     return json.loads(text[start:end + 1])
 
@@ -258,26 +233,21 @@ def call_gemini(model):
     url = f"{GEMINI_BASE}/{model}:generateContent"
 
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": build_prompt()
-                    }
-                ]
-            }
-        ],
+        "contents": [{
+            "parts": [{
+                "text": build_prompt()
+            }]
+        }],
         "generationConfig": {
-            "temperature": 0.9,
+            "temperature": 0.85,
             "responseMimeType": "application/json"
         }
     }
 
-    response = http_retry(
+    response = request_retry(
         "POST",
         url,
         tries=3,
-        backoff=5,
         params={"key": GEMINI_KEY},
         json=payload,
         timeout=(20, 120)
@@ -287,7 +257,7 @@ def call_gemini(model):
         if not response.ok:
             raise RuntimeError(
                 f"Gemini HTTP {response.status_code}: "
-                f"{response.text[:500]}"
+                f"{response.text[:400]}"
             )
 
         data = response.json()
@@ -296,40 +266,16 @@ def call_gemini(model):
         response.close()
 
     try:
-        answer = data["candidates"][0]["content"]["parts"][0]["text"]
+        answer = (
+            data["candidates"][0]
+            ["content"]["parts"][0]["text"]
+        )
     except (KeyError, IndexError, TypeError):
         raise RuntimeError(
-            f"Gemini javobini o'qib bo'lmadi: {str(data)[:500]}"
+            f"Gemini javobi noto'g'ri: {str(data)[:400]}"
         )
 
-    return extract_json(answer)
-
-
-def validate_script(data):
-    if not isinstance(data, dict):
-        raise RuntimeError("Ssenariy formati noto'g'ri.")
-
-    if not data.get("topic"):
-        raise RuntimeError("Mavzu topilmadi.")
-
-    scenes = data.get("scenes", [])
-
-    if len(scenes) < 4:
-        raise RuntimeError(
-            "Gemini kam sahna yaratdi."
-        )
-
-    for scene in scenes:
-        if not scene.get("text"):
-            raise RuntimeError(
-                "Sahnada matn mavjud emas."
-            )
-
-        if not scene.get("keywords"):
-            scene["keywords"] = ["nature", "science"]
-
-    data["scenes"] = scenes
-    return data
+    return parse_json(answer)
 
 
 def generate_script():
@@ -337,33 +283,42 @@ def generate_script():
 
     for model in GEMINI_MODELS:
         try:
-            print(f"\nGemini modeli: {model}")
+            print(f"\nGemini: {model}")
 
             data = call_gemini(model)
-            data = validate_script(data)
+
+            if not data.get("topic"):
+                raise RuntimeError("Mavzu yo'q.")
+
+            if not data.get("scenes"):
+                raise RuntimeError("Sahnalar yo'q.")
+
+            if len(data["scenes"]) < 4:
+                raise RuntimeError("Sahnalar soni yetarli emas.")
+
+            for scene in data["scenes"]:
+                if not scene.get("text"):
+                    raise RuntimeError("Sahna matni yo'q.")
+
+                if not scene.get("keywords"):
+                    scene["keywords"] = ["nature", "science"]
 
             print("Mavzu:", data["topic"])
-            print("Sahnalar:", len(data["scenes"]))
 
             return data
 
         except Exception as error:
             last_error = error
-
-            print(
-                f"Gemini {model} xatosi: "
-                f"{str(error)[:300]}"
-            )
-
+            print(f"Gemini xatosi: {error}")
             time.sleep(3)
 
     raise RuntimeError(
-        f"Barcha Gemini modellari xato berdi: {last_error}"
+        f"Gemini ishlamadi: {last_error}"
     )
 
 
 # =========================================================
-# 7. PIXABAY VIDEO QIDIRISH
+# 5. PIXABAY VIDEO QIDIRISH
 # =========================================================
 
 search_cache = {}
@@ -376,11 +331,10 @@ def pixabay_search(query):
     if query in search_cache:
         return search_cache[query]
 
-    response = http_retry(
+    response = request_retry(
         "GET",
         PIXABAY_URL,
         tries=3,
-        backoff=4,
         params={
             "key": PIXABAY_KEY,
             "q": query,
@@ -408,17 +362,16 @@ def pixabay_search(query):
         )
 
     hits = data.get("hits", [])
-
     search_cache[query] = hits
 
     print(
-        f"  Pixabay '{query}': {len(hits)} ta video"
+        f"Pixabay '{query}': {len(hits)} ta video"
     )
 
     return hits
 
 
-def pick_file(hit):
+def select_video_file(hit):
     videos = hit.get("videos", {})
     candidates = []
 
@@ -428,32 +381,34 @@ def pick_file(hit):
         "small",
         "tiny"
     ):
-        video = videos.get(quality)
+        item = videos.get(quality)
 
-        if not isinstance(video, dict):
+        if not isinstance(item, dict):
             continue
 
-        url = video.get("url")
-        width = video.get("width", 0)
-        height = video.get("height", 0)
+        url = item.get("url")
+        width = item.get("width", 0)
+        height = item.get("height", 0)
 
         if not url or not width or not height:
             continue
 
-        portrait = height > width
+        portrait_bonus = (
+            100000 if height > width else 0
+        )
 
         score = (
-            (100000 if portrait else 0)
+            portrait_bonus
             + min(width * height, 8000000)
         )
 
-        candidates.append((score, video))
+        candidates.append((score, item))
 
     if not candidates:
         return None
 
     candidates.sort(
-        key=lambda item: item[0],
+        key=lambda x: x[0],
         reverse=True
     )
 
@@ -461,11 +416,10 @@ def pick_file(hit):
 
 
 def download_video(url, path):
-    response = http_retry(
+    response = request_retry(
         "GET",
         url,
         tries=3,
-        backoff=3,
         stream=True,
         timeout=(20, 180)
     )
@@ -475,12 +429,12 @@ def download_video(url, path):
     try:
         response.raise_for_status()
 
-        with open(path, "wb") as file:
+        with open(path, "wb") as f:
             for chunk in response.iter_content(
                 chunk_size=1024 * 1024
             ):
                 if chunk:
-                    file.write(chunk)
+                    f.write(chunk)
                     total += len(chunk)
 
     finally:
@@ -490,27 +444,27 @@ def download_video(url, path):
         if os.path.exists(path):
             os.remove(path)
 
-        raise RuntimeError(
-            "Yuklangan video juda kichik."
-        )
+        raise RuntimeError("Video fayli juda kichik.")
 
 
-def get_video(keywords, index):
+def get_video(keywords, scene_index):
     queries = []
 
     for keyword in keywords:
         keyword = str(keyword).strip()
 
-        if keyword:
-            queries.append(keyword)
+        if not keyword:
+            continue
 
-            words = keyword.split()
+        queries.append(keyword)
 
-            if len(words) > 2:
-                queries.append(" ".join(words[:2]))
+        words = keyword.split()
+
+        if len(words) > 2:
+            queries.append(" ".join(words[:2]))
 
     queries.extend([
-        "nature",
+        "cinematic nature",
         "science",
         "space",
         "ocean"
@@ -521,11 +475,8 @@ def get_video(keywords, index):
     for query in queries:
         try:
             hits = list(pixabay_search(query))
-
         except Exception as error:
-            print(
-                f"Pixabay qidiruv xatosi: {error}"
-            )
+            print(f"Qidiruv xatosi: {error}")
             continue
 
         random.shuffle(hits)
@@ -536,19 +487,19 @@ def get_video(keywords, index):
             if video_id in used_video_ids:
                 continue
 
-            video = pick_file(hit)
+            selected = select_video_file(hit)
 
-            if not video:
+            if not selected:
                 continue
 
             path = os.path.join(
                 TEMP,
-                f"scene_{index}.mp4"
+                f"scene_{scene_index}.mp4"
             )
 
             try:
                 download_video(
-                    video["url"],
+                    selected["url"],
                     path
                 )
 
@@ -559,81 +510,72 @@ def get_video(keywords, index):
                     "https://pixabay.com/videos/"
                 )
 
-                print(
-                    f"  Video yuklandi: {video_id}"
-                )
-
                 return path, source_url
 
             except Exception as error:
-                print(
-                    f"Video yuklash xatosi: {error}"
-                )
+                print(f"Video yuklash xatosi: {error}")
 
                 if os.path.exists(path):
                     os.remove(path)
 
     raise RuntimeError(
-        f"Pixabay'dan video topilmadi: {keywords}"
+        f"Mos Pixabay videosi topilmadi: {keywords}"
     )
 
 
 # =========================================================
-# 8. O'ZBEKCHA OVOZ YARATISH
+# 6. O'ZBEKCHA OVOZ
 # =========================================================
 
-async def make_voice(text, output_path):
-    communicate = edge_tts.Communicate(
+async def create_voice(text, path):
+    speaker = edge_tts.Communicate(
         text=text,
         voice=VOICE,
         rate=VOICE_RATE
     )
 
-    await communicate.save(output_path)
+    await speaker.save(path)
 
 
-def synth_voice(text, output_path):
+def synthesize_voice(text, path):
     asyncio.run(
-        make_voice(text, output_path)
+        create_voice(text, path)
     )
 
-    if not os.path.exists(output_path):
-        raise RuntimeError(
-            "Ovoz fayli yaratilmadi."
-        )
+    if not os.path.exists(path):
+        raise RuntimeError("Ovoz fayli yaratilmadi.")
 
 
 # =========================================================
-# 9. SUBTITR YARATISH
+# 7. SUBTITR DIZAYNI
 # =========================================================
 
 def get_font(size):
-    possible_fonts = [
+    paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
     ]
 
-    for path in possible_fonts:
+    for path in paths:
         if os.path.exists(path):
             return ImageFont.truetype(path, size)
 
     return ImageFont.load_default()
 
 
-def wrap_text(draw, text, font, max_width):
+def wrap_lines(draw, text, font, max_width):
     words = text.split()
     lines = []
     current = ""
 
     for word in words:
-        test = (
-            current + " " + word
-        ).strip()
+        test = (current + " " + word).strip()
 
         width = draw.textbbox(
             (0, 0),
             test,
-            font=font
+            font=font,
+            stroke_width=1
         )[2]
 
         if width <= max_width:
@@ -641,7 +583,6 @@ def wrap_text(draw, text, font, max_width):
         else:
             if current:
                 lines.append(current)
-
             current = word
 
     if current:
@@ -650,7 +591,7 @@ def wrap_text(draw, text, font, max_width):
     return lines
 
 
-def make_subtitle(text, duration, output_path):
+def make_overlay(text, scene_number, total_scenes, duration):
     image = Image.new(
         "RGBA",
         (W, H),
@@ -659,41 +600,104 @@ def make_subtitle(text, duration, output_path):
 
     draw = ImageDraw.Draw(image)
 
-    font = get_font(62)
+    # Yuqoridagi kichik brend yozuvi
+    small_font = get_font(34)
 
-    lines = wrap_text(
+    draw.rounded_rectangle(
+        (65, 75, 440, 145),
+        radius=25,
+        fill=(0, 0, 0, 145)
+    )
+
+    draw.text(
+        (90, 92),
+        "BILIM  /  FAKTLAR",
+        font=small_font,
+        fill=(255, 255, 255, 240)
+    )
+
+    # Sahnalar progress chizig'i
+    bar_x = 65
+    bar_y = 175
+    bar_width = 950
+    gap = 8
+
+    segment_width = (
+        bar_width - gap * (total_scenes - 1)
+    ) / total_scenes
+
+    for i in range(total_scenes):
+        x1 = bar_x + i * (segment_width + gap)
+
+        draw.rounded_rectangle(
+            (
+                int(x1),
+                bar_y,
+                int(x1 + segment_width),
+                bar_y + 9
+            ),
+            radius=5,
+            fill=(
+                (255, 255, 255, 235)
+                if i < scene_number
+                else (255, 255, 255, 80)
+            )
+        )
+
+    # Subtitr paneli
+    font = get_font(60)
+
+    lines = wrap_lines(
         draw,
         text,
         font,
-        900
+        850
     )
 
     line_height = 82
-    total_height = len(lines) * line_height
+    panel_height = max(
+        150,
+        len(lines) * line_height + 70
+    )
 
-    start_y = int(H * 0.72) - total_height // 2
+    panel_top = int(H * 0.68)
+
+    draw.rounded_rectangle(
+        (
+            55,
+            panel_top,
+            1025,
+            panel_top + panel_height
+        ),
+        radius=35,
+        fill=(0, 0, 0, 175),
+        outline=(255, 255, 255, 45),
+        width=2
+    )
+
+    y = panel_top + 35
 
     for line in lines:
         bbox = draw.textbbox(
             (0, 0),
             line,
             font=font,
-            stroke_width=3
+            stroke_width=2
         )
 
         text_width = bbox[2] - bbox[0]
         x = (W - text_width) // 2
 
         draw.text(
-            (x, start_y),
+            (x, y),
             line,
             font=font,
             fill="white",
-            stroke_width=4,
-            stroke_fill="black"
+            stroke_width=2,
+            stroke_fill=(0, 0, 0, 220)
         )
 
-        start_y += line_height
+        y += line_height
 
     return ImageClip(
         np.array(image)
@@ -701,7 +705,7 @@ def make_subtitle(text, duration, output_path):
 
 
 # =========================================================
-# 10. VERTICAL VIDEO TAYYORLASH
+# 8. VIDEO FORMATINI MOSLASH
 # =========================================================
 
 def prepare_video(path, duration):
@@ -726,22 +730,24 @@ def prepare_video(path, duration):
         height=H
     )
 
-    clip = clip.with_effects([
-        vfx.Loop(duration=duration)
-    ])
+    # Qisqa lavhalarni kerakli muddatga aylantirish
+    if clip.duration < duration:
+        clip = clip.with_effects([
+            vfx.Loop(duration=duration)
+        ])
+    else:
+        clip = clip.subclipped(0, duration)
 
-    clip = clip.with_duration(duration)
-
-    return clip
+    return clip.with_duration(duration)
 
 
 # =========================================================
-# 11. HAR BIR SAHNANI YIG'ISH
+# 9. SAHNA YARATISH
 # =========================================================
 
-def build_scene(scene, index):
+def build_scene(scene, index, total):
     print(
-        f"\nSahna {index + 1} tayyorlanmoqda..."
+        f"\nSahna {index + 1}/{total}"
     )
 
     text = scene["text"]
@@ -757,7 +763,7 @@ def build_scene(scene, index):
         f"voice_{index + 1}.mp3"
     )
 
-    synth_voice(
+    synthesize_voice(
         text,
         audio_path
     )
@@ -770,17 +776,15 @@ def build_scene(scene, index):
         duration
     )
 
-    subtitle = make_subtitle(
+    overlay = make_overlay(
         text,
-        duration,
-        os.path.join(
-            TEMP,
-            f"subtitle_{index + 1}.png"
-        )
+        index + 1,
+        total,
+        duration
     )
 
     final_scene = CompositeVideoClip(
-        [video, subtitle],
+        [video, overlay],
         size=(W, H)
     ).with_audio(audio)
 
@@ -788,126 +792,66 @@ def build_scene(scene, index):
 
 
 # =========================================================
-# 12. TELEGRAM XABAR YUBORISH
+# 10. FAYLLARNI SAQLASH
 # =========================================================
 
-def tg_message(text):
-    url = f"{TELEGRAM_URL}/sendMessage"
-
-    response = http_retry(
-        "POST",
-        url,
-        tries=3,
-        backoff=3,
-        data={
-            "chat_id": TG_CHAT,
-            "text": text
-        },
-        timeout=(15, 60)
-    )
-
-    try:
-        if not response.ok:
-            raise RuntimeError(
-                f"Telegram xatosi: {response.text[:300]}"
-            )
-
-        result = response.json()
-
-        if not result.get("ok"):
-            raise RuntimeError(
-                f"Telegram xatosi: {result}"
-            )
-
-    finally:
-        response.close()
-
-
-def tg_send_video(path, caption):
-    url = f"{TELEGRAM_URL}/sendVideo"
-
-    with open(path, "rb") as video_file:
-        response = requests.post(
-            url,
-            data={
-                "chat_id": TG_CHAT,
-                "caption": caption
-            },
-            files={
-                "video": (
-                    "reels.mp4",
-                    video_file,
-                    "video/mp4"
-                )
-            },
-            timeout=(30, 600)
+def save_script(data):
+    with open(
+        SCRIPT_PATH,
+        "w",
+        encoding="utf-8"
+    ) as f:
+        json.dump(
+            data,
+            f,
+            ensure_ascii=False,
+            indent=2
         )
 
-    try:
-        if not response.ok:
-            raise RuntimeError(
-                f"Telegram video xatosi: "
-                f"{response.text[:500]}"
-            )
 
-        result = response.json()
-
-        if not result.get("ok"):
-            raise RuntimeError(
-                f"Telegram video yuborilmadi: {result}"
-            )
-
-    finally:
-        response.close()
-
-
-# =========================================================
-# 13. MANBALAR RO'YXATI
-# =========================================================
-
-def make_sources_message(data, video_sources):
+def save_sources(data, video_sources):
     lines = [
-        "📚 VIDEO MANBALARI",
+        "VIDEO MANBALARI",
+        "=" * 45,
         "",
-        f"🎬 Mavzu: {data['topic']}",
+        f"Mavzu: {data['topic']}",
+        f"Sarlavha: {data.get('title', '')}",
         "",
-        "🎥 Pixabay videolari:"
+        "PIXABAY VIDEOLARI:"
     ]
 
     for index, url in enumerate(
         video_sources,
-        start=1
+        1
     ):
-        lines.append(
-            f"{index}. {url}"
-        )
+        lines.append(f"{index}. {url}")
 
-    sources = data.get("sources", [])
+    lines.extend([
+        "",
+        "FAKT MANBALARI:"
+    ])
 
-    if sources:
-        lines.extend([
-            "",
-            "📖 Faktlar uchun manbalar:"
-        ])
+    for index, source in enumerate(
+        data.get("sources", []),
+        1
+    ):
+        lines.append(f"{index}. {source}")
 
-        for index, source in enumerate(
-            sources,
-            start=1
-        ):
-            lines.append(
-                f"{index}. {source}"
-            )
-
-    return "\n".join(lines)
+    with open(
+        SOURCES_PATH,
+        "w",
+        encoding="utf-8"
+    ) as f:
+        f.write("\n".join(lines))
 
 
 # =========================================================
-# 14. ESKI VAQTINCHALIK FAYLLARNI TOZALASH
+# 11. TEMP FAYLLARNI TOZALASH
 # =========================================================
 
 def clean_temp():
-    for filename in os.listdir(TEMP):
-        path = os.path.join(TEMP, filename)
+    for name in os.listdir(TEMP):
+        path = os.path.join(TEMP, name)
 
         try:
             if os.path.isfile(path):
@@ -917,101 +861,86 @@ def clean_temp():
 
 
 # =========================================================
-# 15. ASOSIY JARAYON
+# 12. ASOSIY JARAYON
 # =========================================================
 
 def main():
     print("\n================================")
-    print("UZBEK REELS BOT ISHGA TUSHDI")
+    print("PROFESSIONAL UZBEK REELS BOT")
     print("================================\n")
 
     clean_temp()
 
-    tg_message(
-        "⏳ Bugungi Reels tayyorlanmoqda..."
-    )
-
-    # 1. Gemini ssenariy yaratadi
+    # Gemini ssenariy yaratadi
     data = generate_script()
 
-    print("\nMavzu:", data["topic"])
+    save_script(data)
 
-    # 2. Har bir sahna uchun video va ovoz
     scenes = []
     video_sources = []
 
-    for index, scene in enumerate(
-        data["scenes"]
-    ):
-        final_scene, source_url = build_scene(
-            scene,
-            index
+    try:
+        total = len(data["scenes"])
+
+        for index, scene in enumerate(data["scenes"]):
+            final_scene, source_url = build_scene(
+                scene,
+                index,
+                total
+            )
+
+            scenes.append(final_scene)
+            video_sources.append(source_url)
+
+        print("\nSahnalar birlashtirilmoqda...")
+
+        final_video = concatenate_videoclips(
+            scenes,
+            method="compose"
         )
 
-        scenes.append(final_scene)
-        video_sources.append(source_url)
+        print("\nMP4 render boshlandi...")
 
-    # 3. Barcha sahnalarni birlashtirish
-    print("\nSahnalar birlashtirilmoqda...")
+        final_video.write_videofile(
+            VIDEO_PATH,
+            fps=FPS,
+            codec="libx264",
+            audio_codec="aac",
+            bitrate="8000k",
+            preset="medium",
+            threads=4,
+            logger="bar"
+        )
 
-    final_video = concatenate_videoclips(
-        scenes,
-        method="compose"
-    )
+        final_video.close()
 
-    # 4. MP4 render
-    print("\nVideo render qilinmoqda...")
+    finally:
+        for scene in scenes:
+            try:
+                scene.close()
+            except Exception:
+                pass
 
-    final_video.write_videofile(
-        VIDEO_PATH,
-        fps=FPS,
-        codec="libx264",
-        audio_codec="aac",
-        bitrate="8000k",
-        preset="medium",
-        threads=4,
-        logger="bar"
-    )
-
-    final_video.close()
-
-    for scene in scenes:
-        scene.close()
-
-    # 5. Telegram'ga video yuborish
-    print("\nTelegram'ga yuborilmoqda...")
-
-    caption = (
-        f"🎬 {data['title']}\n\n"
-        f"📌 {data['topic']}\n\n"
-        "#bilim #faktlar #uzbekistan #reels"
-    )
-
-    tg_send_video(
-        VIDEO_PATH,
-        caption
-    )
-
-    # 6. Manbalarni alohida yuborish
-    sources_message = make_sources_message(
+    # Manbalarni alohida saqlash
+    save_sources(
         data,
         video_sources
     )
 
-    tg_message(sources_message)
-
-    # 7. Mavzuni tarixga saqlash
-    save_used_topic(
+    save_topic(
         data["topic"]
     )
 
     print("\n================================")
-    print("REELS MUVAFFAQIYATLI YUBORILDI!")
+    print("VIDEO TAYYOR!")
     print("================================")
+    print("Video:", VIDEO_PATH)
+    print("Manbalar:", SOURCES_PATH)
+    print("Ssenariy:", SCRIPT_PATH)
 
 
 # =========================================================
-# 16. XATOLARNI USHLASH
+# 13. XATOLARNI USHLASH
 # =========================================================
 
 if __name__ == "__main__":
@@ -1020,13 +949,5 @@ if __name__ == "__main__":
 
     except Exception as error:
         traceback.print_exc()
-
-        try:
-            tg_message(
-                "❌ Reels bot xatosi:\n"
-                + str(error)[:1000]
-            )
-        except Exception:
-            pass
-
+        print("\nBOT XATOSI:", error)
         sys.exit(1)
