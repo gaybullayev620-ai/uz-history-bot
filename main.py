@@ -12,7 +12,7 @@ import textwrap
 import requests
 import numpy as np
 import edge_tts
-
+from instagram_post import post_to_instagram
 from PIL import Image, ImageDraw, ImageFont
 
 from moviepy import (
@@ -937,7 +937,7 @@ def main():
     print("Video:", VIDEO_PATH)
     print("Manbalar:", SOURCES_PATH)
     print("Ssenariy:", SCRIPT_PATH)
-
+    post_to_instagram(VIDEO_PATH, data)
 
 # =========================================================
 # 13. XATOLARNI USHLASH
