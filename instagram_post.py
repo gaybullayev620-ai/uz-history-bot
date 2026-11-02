@@ -19,6 +19,8 @@ UPLOAD_POST_USER = os.getenv("UPLOAD_POST_USER") or "default"
 
 HASHTAGS = "#faktlar #bilim #qiziqarli #reels"
 
+UPLOAD_TRIES = 3
+
 
 def make_caption(data):
     title = str(data.get("title") or data.get("topic") or "").strip()
@@ -38,6 +40,26 @@ def make_caption(data):
 
 def _headers():
     return {"Authorization": f"Apikey {UPLOAD_POST_KEY}"}
+
+
+def _upload_exists(request_id):
+    """Shu request_id bilan yuklash Upload-Post'da allaqachon bormi?"""
+    try:
+        response = requests.get(
+            f"{API_BASE}/uploadposts/status",
+            headers=_headers(),
+            params={"request_id": request_id},
+            timeout=(20, 60),
+        )
+
+        if not response.ok:
+            return False
+
+        info = response.json()
+        return bool(info.get("status") or info.get("results"))
+
+    except Exception:
+        return False
 
 
 def _wait_for_result(request_id, timeout=900):
@@ -93,6 +115,20 @@ def _wait_for_result(request_id, timeout=900):
     raise RuntimeError("Instagram natijasini kutish vaqti tugadi.")
 
 
+def _send_video(video_path, form, request_id):
+    with open(video_path, "rb") as video_file:
+        return requests.post(
+            f"{API_BASE}/upload",
+            headers={
+                **_headers(),
+                "X-Request-Id": request_id,
+            },
+            data=form,
+            files={"video": ("reels.mp4", video_file, "video/mp4")},
+            timeout=(30, 300),
+        )
+
+
 def post_to_instagram(video_path, data):
     if not UPLOAD_POST_KEY:
         print(
@@ -107,8 +143,11 @@ def post_to_instagram(video_path, data):
     caption = make_caption(data)
     request_id = str(uuid.uuid4())
 
+    size_mb = os.path.getsize(video_path) / (1024 * 1024)
+
     print("\nInstagram'ga yuborilmoqda...")
     print(f"Profil: {UPLOAD_POST_USER}")
+    print(f"Video hajmi: {size_mb:.1f} MB")
 
     form = {
         "user": UPLOAD_POST_USER,
@@ -119,22 +158,54 @@ def post_to_instagram(video_path, data):
         "request_id": request_id,
     }
 
-    with open(video_path, "rb") as video_file:
-        response = requests.post(
-            f"{API_BASE}/upload",
-            headers=_headers(),
-            data=form,
-            files={"video": ("reels.mp4", video_file, "video/mp4")},
-            timeout=(30, 600),
-        )
+    last_error = None
 
-    if not response.ok:
+    for attempt in range(1, UPLOAD_TRIES + 1):
+        try:
+            print(f"Yuklash urinishi {attempt}/{UPLOAD_TRIES}...")
+
+            response = _send_video(video_path, form, request_id)
+
+            if response.ok:
+                print("Video yuborildi.")
+                last_error = None
+                break
+
+            # 5xx xatolarda qayta urinamiz, boshqalarida to'xtaymiz
+            message = (
+                f"Upload-Post HTTP {response.status_code}: "
+                f"{response.text[:400]}"
+            )
+
+            if response.status_code in (500, 502, 503, 504):
+                last_error = RuntimeError(message)
+                print(message)
+            else:
+                raise RuntimeError(message)
+
+        except requests.RequestException as error:
+            last_error = error
+            print(f"Yuklashda uzilish: {error}")
+
+            # Ehtimol server videoni qabul qilgan. Ikki marta
+            # joylamaslik uchun avval holatni tekshiramiz.
+            time.sleep(10)
+
+            if _upload_exists(request_id):
+                print("Server videoni qabul qilgan. Natijani kutamiz.")
+                last_error = None
+                break
+
+        if attempt < UPLOAD_TRIES:
+            wait = 15 * attempt
+            print(f"{wait}s kutib, qayta urinamiz...")
+            time.sleep(wait)
+
+    if last_error is not None:
         raise RuntimeError(
-            f"Upload-Post HTTP {response.status_code}: "
-            f"{response.text[:400]}"
+            f"Instagram'ga yuklab bo'lmadi: {last_error}"
         )
 
-    print("Video yuborildi. Instagram natijasi kutilmoqda...")
+    print("Instagram natijasi kutilmoqda...")
 
     return _wait_for_result(request_id)
-
