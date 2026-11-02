@@ -242,9 +242,8 @@ def call_gemini(model):
             }]
         }],
         "generationConfig": {
-            "temperature": 0.85,
-            "responseMimeType": "application/json"
-        }
+    "responseMimeType": "application/json"
+}
     }
 
     response = request_retry(
