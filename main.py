@@ -206,7 +206,7 @@ def search_pixabay(query):
         response = requests.get(
             "https://pixabay.com/api/videos/",
             params={
-                "key": PIXABAY_KEY,
+                "key": PEXELS_KEY,
                 "q": query,
                 "per_page": 20,
                 "safesearch": "true"
