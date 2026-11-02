@@ -42,7 +42,7 @@ TEMP = os.path.join(OUT, "temp")
 VIDEO_PATH = os.path.join(OUT, "reels.mp4")
 SOURCES_PATH = os.path.join(OUT, "sources.txt")
 SCRIPT_PATH = os.path.join(OUT, "script.json")
-USED_TOPICS_PATH = os.path.join(OUT, "used_topics.json")
+USED_TOPICS_PATH = os.path.join(BASE_DIR, "used_topics.json")
 
 os.makedirs(OUT, exist_ok=True)
 os.makedirs(TEMP, exist_ok=True)
