@@ -1114,7 +1114,10 @@ def main():
     print("Video:", VIDEO_PATH)
     print("Manbalar:", SOURCES_PATH)
     print("Ssenariy:", SCRIPT_PATH)
-    post_to_instagram(VIDEO_PATH, data)
+    if os.getenv("DRY_RUN", "").lower() == "true":
+        print("\nSINOV REJIMI: Instagram'ga joylash o'tkazib yuborildi.")
+    else:
+        post_to_instagram(VIDEO_PATH, data)
 
 
 # =========================================================
