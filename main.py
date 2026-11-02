@@ -57,11 +57,9 @@ if not PIXABAY_KEY:
     raise RuntimeError("PIXABAY_API_KEY topilmadi!")
 
 GEMINI_MODELS = [
-    GEMINI_MODELS = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
-]
 ]
 
 GEMINI_BASE = (
