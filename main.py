@@ -1,4 +1,3 @@
-
 import os
 import re
 import sys
@@ -33,7 +32,9 @@ W, H = 1080, 1920
 FPS = 30
 
 VOICE = "uz-UZ-SardorNeural"
-VOICE_RATE = "+5%"
+# Ovoz: biroz qalin (pitch past) va tabiiyroq tezlik
+VOICE_RATE = "-3%"
+VOICE_PITCH = "-6Hz"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE_DIR, "output")
@@ -67,6 +68,10 @@ GEMINI_BASE = (
 )
 
 PIXABAY_URL = "https://pixabay.com/api/videos/"
+
+# Ssenariydagi sahnalarning asosiy ko'rinadigan so'zlari.
+# main() ichida to'ldiriladi, video topilmaganda zaxira sifatida ishlatiladi.
+SCENE_FALLBACKS = []
 
 
 # =========================================================
@@ -148,6 +153,24 @@ def save_topic(topic):
 # 4. GEMINI SSENARIY
 # =========================================================
 
+CATEGORIES = [
+    "inson tanasi haqida hayratlanarli va kutilmagan faktlar",
+    "miya va psixologiya: odamlar nega shunday qiladi",
+    "uyqu, ovqat va salomatlik haqidagi mif va haqiqatlar",
+    "pul, boylik va boy odamlarning odatlari haqida faktlar",
+    "hayvonlar olamidagi ajoyib va kutilmagan faktlar",
+    "koinot haqida tasavvurga sig'maydigan faktlar",
+    "nima bo'lardi agar... (qiziqarli ilmiy savollar)",
+    "dunyo rekordlari va g'alati, lekin haqiqiy voqealar",
+    "Amir Temur, Ulug'bek, Bobur va Turon tarixidagi shok voqealar",
+    "qadimgi dunyo sirlari va yechilmagan jumboqlar",
+    "mashhur kashfiyotlar va tasodifan qilingan ixtirolar",
+    "texnologiya va sun'iy intellekt haqida hayratlanarli faktlar",
+    "dunyoning eng g'alati joylari va mamlakatlari",
+    "sevgi, do'stlik va munosabatlar psixologiyasi",
+]
+
+
 def build_prompt():
     previous = load_used_topics()
 
@@ -155,27 +178,56 @@ def build_prompt():
         f"- {x}" for x in previous[-30:]
     )
 
+    category = random.choice(CATEGORIES)
+
     return f"""
-Sen professional Instagram Reels ssenariy muallifisan.
+Sen professional o'zbek Instagram Reels ssenariy muallifisan.
+Matnni diktor ovozda o'qiydi, shuning uchun u og'zaki nutqqa mos bo'lsin.
 
 AUDITORIYA:
-O'zbek tilida gaplashadigan, qiziqarli faktlar,
-ilm-fan, tarix, tabiat va koinotga qiziquvchi odamlar.
+O'zbek tilida gaplashadigan oddiy, keng ommaviy auditoriya.
+"Voy, rostdanmi?" deb hayratlanadigan narsalarni yaxshi ko'radi.
+
+BUGUNGI KATEGORIYA:
+{category}
 
 VAZIFA:
-Har safar yangi, hayratlanarli va tekshiriladigan
-haqiqiy fakt asosida 35-45 soniyalik video ssenariysi yarat.
+Shu kategoriyada ko'pchilik qiziqadigan, tushunarli va
+haqiqiy faktga asoslangan 35-45 soniyalik ssenariy yarat.
 
-PROFESSIONAL USLUB:
-- Birinchi 2 soniyada kuchli HOOK.
-- Tomoshabinda savol va qiziqish uyg'ot.
-- Keraksiz kirish va salomlashish bo'lmasin.
-- Har bir gap keyingi sahnani ko'rishga undasin.
-- Matn tabiiy, sodda va ravon o'zbek tilida bo'lsin.
-- Oxirida qisqa, esda qoladigan yakun bo'lsin.
-- Soxta fakt, yolg'on statistika va uydirma manba ishlatma.
+MAVZU QOIDALARI:
+- Odamning o'z hayoti, tanasi, puli, qo'rquvi yoki odatlari
+  bilan bog'liq mavzu afzal.
+- Juda tor ilmiy mavzu tanlama.
+- Mavzu shunday bo'lsinki, odam do'stiga yuborsin.
+- Raqam, taqqoslash va kutilmagan burilish ishlat.
 
-AVVAL ISHLATILGAN MAVZULAR:
+OVOZ UCHUN MATN QOIDALARI (juda muhim):
+- Birinchi sahna: shok fakt yoki savol bilan kuchli hook.
+- Tomoshabinga "siz" deb murojaat qil.
+- Gaplar qisqa bo'lsin (8-12 so'z), tirik suhbatdek.
+- Raqamlarni so'z bilan yoz: "2500" emas, "ikki ming besh yuz".
+- Qisqartma, belgi (%, $, &), qavs va tirnoq ishlatma.
+  "foiz", "dollar" deb yoz.
+- Chet el nomlarini o'qilishi bo'yicha yoz.
+- Vergul va nuqtani to'g'ri qo'y, ovoz shu joylarda to'xtaydi.
+- Matn lotin yozuvida, o' va g' harflari bilan yozilsin.
+- Oxirida kutilmagan yakun yoki munozara savoli bo'lsin.
+- Soxta fakt va uydirma manba ishlatma.
+
+VIDEO QIDIRUV SO'ZLARI QOIDALARI (juda muhim):
+- Keywords oddiy ingliz tilida, Pixabay uchun yoziladi.
+- Har sahnada ovoz nima haqida gapirayotgan bo'lsa,
+  video aynan shuni ko'rsatsin.
+- Birinchi keyword: sahnadagi asosiy ko'rinadigan narsa,
+  1-2 so'z (masalan: "shark", "human brain", "pyramid").
+- Mavzu akula bo'lsa, har sahnada keywords ichida
+  "shark" bo'lsin. Boshqa mavzularda ham shunday.
+- Mavhum so'z ishlatma (fact, history, secret, idea, mystery).
+- Faqat ko'z bilan ko'rinadigan narsalarni yoz.
+- Har sahnaga 3 ta keyword ber, eng aniqdan umumiyga qarab.
+
+AVVAL ISHLATILGAN MAVZULAR (takrorlama):
 {previous_text}
 
 JSON FORMAT:
@@ -183,13 +235,14 @@ JSON FORMAT:
   "topic": "Mavzu nomi",
   "title": "Qisqa va qiziqarli sarlavha",
   "hook": "Videoning birinchi jumlasi",
-  "category": "science",
+  "category": "kategoriya nomi",
   "scenes": [
     {{
       "text": "Ovoz uchun o'zbekcha matn",
       "keywords": [
-        "english video search keyword",
-        "another english keyword"
+        "main visible subject",
+        "related visual",
+        "general visual"
       ]
     }}
   ],
@@ -201,11 +254,8 @@ JSON FORMAT:
 TALABLAR:
 - 6 ta sahna yarat.
 - Umumiy matn 35-45 soniyaga mos bo'lsin.
-- Birinchi sahna eng kuchli hook bo'lsin.
-- Har bir sahna 1-2 qisqa gapdan iborat bo'lsin.
-- Keywords ingliz tilida bo'lsin.
-- Har sahnaga 2-3 ta aniq qidiruv iborasi ber.
-- JSON'dan tashqari hech qanday izoh yozma.
+- Har sahna 1-2 qisqa gapdan iborat bo'lsin.
+- JSON'dan tashqari hech narsa yozma.
 """
 
 
@@ -240,8 +290,8 @@ def call_gemini(model):
             }]
         }],
         "generationConfig": {
-    "responseMimeType": "application/json"
-}
+            "responseMimeType": "application/json"
+        }
     }
 
     response = request_retry(
@@ -463,6 +513,11 @@ def get_video(keywords, scene_index):
         if len(words) > 2:
             queries.append(" ".join(words[:2]))
 
+    # Zaxira 1: shu ssenariyning boshqa sahnalaridagi asosiy
+    # so'zlar (mavzuga aloqador bo'lib qoladi)
+    queries.extend(SCENE_FALLBACKS)
+
+    # Zaxira 2: eng oxirgi umumiy zaxira
     queries.extend([
         "cinematic nature",
         "science",
@@ -527,11 +582,121 @@ def get_video(keywords, scene_index):
 # 6. O'ZBEKCHA OVOZ
 # =========================================================
 
+ONES = [
+    "nol", "bir", "ikki", "uch", "to'rt",
+    "besh", "olti", "yetti", "sakkiz", "to'qqiz"
+]
+
+TENS = [
+    "", "o'n", "yigirma", "o'ttiz", "qirq",
+    "ellik", "oltmish", "yetmish", "sakson", "to'qson"
+]
+
+
+def _under_thousand(n):
+    parts = []
+
+    hundreds = n // 100
+    rest = n % 100
+
+    if hundreds:
+        parts.append(ONES[hundreds])
+        parts.append("yuz")
+
+    if rest >= 10:
+        parts.append(TENS[rest // 10])
+
+    if rest % 10:
+        parts.append(ONES[rest % 10])
+
+    return parts
+
+
+def number_to_words(n):
+    """Butun sonni o'zbekcha so'zga aylantiradi (ovoz uchun)."""
+    if n == 0:
+        return ONES[0]
+
+    scales = [
+        (10 ** 9, "milliard"),
+        (10 ** 6, "million"),
+        (10 ** 3, "ming"),
+    ]
+
+    parts = []
+
+    for value, name in scales:
+        chunk = n // value
+
+        if chunk:
+            if n >= 10 ** 12:
+                return str(n)
+
+            parts.extend(_under_thousand(chunk))
+            parts.append(name)
+            n %= value
+
+    if n:
+        parts.extend(_under_thousand(n))
+
+    return " ".join(parts)
+
+
+def clean_voice_text(text):
+    """
+    Ovoz uchun matnni tozalaydi: belgilar va raqamlar
+    so'zga aylanadi, shunda talaffuz to'g'ri chiqadi.
+    Subtitrlar asl matnda qoladi.
+    """
+    text = str(text)
+
+    text = text.replace("%", " foiz ")
+    text = text.replace("$", " dollar ")
+    text = text.replace("&", " va ")
+    text = text.replace("€", " yevro ")
+
+    # Kasr sonlar: 3.5 yoki 3,5
+    def decimal(match):
+        whole = number_to_words(int(match.group(1)))
+        frac = " ".join(
+            ONES[int(d)] for d in match.group(2)
+        )
+        return f"{whole} butun {frac}"
+
+    text = re.sub(
+        r"(\d+)[.,](\d+)",
+        decimal,
+        text
+    )
+
+    # Bo'shliq bilan yozilgan minglar: 1 000 000
+    text = re.sub(
+        r"(?<=\d) (?=\d{3}(?!\d))",
+        "",
+        text
+    )
+
+    text = re.sub(
+        r"\d+",
+        lambda m: number_to_words(int(m.group(0))),
+        text
+    )
+
+    # Qavs, tirnoq va boshqa ortiqcha belgilar
+    text = re.sub(r"[()\[\]{}\"«»“”*_#~^<>|/\\]", " ", text)
+    text = text.replace("—", ", ").replace("–", ", ")
+
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
 async def create_voice(text, path):
     speaker = edge_tts.Communicate(
-        text=text,
+        text=clean_voice_text(text),
         voice=VOICE,
-        rate=VOICE_RATE
+        rate=VOICE_RATE,
+        pitch=VOICE_PITCH
     )
 
     await speaker.save(path)
@@ -876,6 +1041,18 @@ def main():
 
     save_script(data)
 
+    # Video topilmaganda mavzuga aloqador zaxira so'zlar
+    SCENE_FALLBACKS.clear()
+
+    for scene in data["scenes"]:
+        keywords = scene.get("keywords") or []
+
+        if keywords:
+            word = str(keywords[0]).strip()
+
+            if word and word not in SCENE_FALLBACKS:
+                SCENE_FALLBACKS.append(word)
+
     scenes = []
     video_sources = []
 
@@ -938,6 +1115,7 @@ def main():
     print("Manbalar:", SOURCES_PATH)
     print("Ssenariy:", SCRIPT_PATH)
     post_to_instagram(VIDEO_PATH, data)
+
 
 # =========================================================
 # 13. XATOLARNI USHLASH
