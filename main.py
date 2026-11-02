@@ -43,13 +43,22 @@ ZOOM = os.environ.get("ZOOM", "1") == "1"   # kadrlarda yengil yaqinlashish
 ZOOM_AMOUNT = 0.06
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-# Model nomlarini GitHub'da GEMINI_MODELS (vergul bilan) orqali almashtirish mumkin.
-GEMINI_MODELS = [
-    m.strip() for m in os.environ.get(
-        "GEMINI_MODELS",
-        "gemini-flash-latest,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash"
-    ).split(",") if m.strip()
+# Modellar avtomatik aniqlanadi (discover_models). Bular faqat zaxira.
+FALLBACK_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
 ]
+# Qo'shimcha modellarni GEMINI_MODELS (vergul bilan) orqali berish mumkin.
+EXTRA_MODELS = [
+    m.strip() for m in os.environ.get("GEMINI_MODELS", "").split(",") if m.strip()
+]
+# Matn ssenariy uchun yaramaydigan model turlari
+SKIP_WORDS = (
+    "image", "tts", "audio", "live", "embedding", "robotics",
+    "computer", "customtools", "exp", "learnlm", "aqa",
+)
 
 PEXELS_URL = "https://api.pexels.com/videos/search"
 
@@ -261,8 +270,8 @@ def call_gemini(model, prompt):
     response = http_retry(
         "POST",
         f"{GEMINI_URL}/{model}:generateContent",
-        tries=3,
-        backoff=5,
+        tries=2,
+        backoff=4,
         headers={
             "x-goog-api-key": GEMINI_KEY,
             "Content-Type": "application/json",
@@ -275,7 +284,7 @@ def call_gemini(model, prompt):
                 "maxOutputTokens": 8192,
             },
         },
-        timeout=(15, 150),
+        timeout=(15, 75),
     )
 
     if response.status_code in (400, 401, 403, 404):
@@ -371,11 +380,58 @@ def validate_script(data, used):
     return data
 
 
+def discover_models():
+    """Gemini'dan hozir mavjud flash modellarni so'raydi (eng yangisi birinchi)."""
+    found = []
+
+    try:
+        response = http_retry(
+            "GET",
+            GEMINI_URL,
+            tries=2,
+            backoff=3,
+            headers={"x-goog-api-key": GEMINI_KEY},
+            params={"pageSize": 200},
+            timeout=(10, 30),
+        )
+
+        if response.ok:
+            for m in response.json().get("models", []):
+                name = m.get("name", "").replace("models/", "")
+                low = name.lower()
+
+                if not low.startswith("gemini") or "flash" not in low:
+                    continue
+                if "generateContent" not in m.get("supportedGenerationMethods", []):
+                    continue
+                if any(bad in low for bad in SKIP_WORDS):
+                    continue
+
+                match = re.search(r"gemini-(\d+(?:\.\d+)?)", low)
+                version = float(match.group(1)) if match else 0.0
+
+                # tartib: yangi versiya, lite emas, preview emas
+                found.append((-version, "lite" in low, "preview" in low, name))
+
+            found.sort()
+        else:
+            print(f"Modellar ro'yxati olinmadi: HTTP {response.status_code}")
+
+    except Exception as error:
+        print("Modellar ro'yxati olinmadi:", str(error)[:200])
+
+    discovered = [item[-1] for item in found]
+    models = list(dict.fromkeys(discovered[:4] + EXTRA_MODELS + FALLBACK_MODELS))[:7]
+    print("Gemini modellari:", ", ".join(models))
+    return models
+
+
 def generate_script(category, used):
     prompt = build_prompt(category, used)
+    models = discover_models()
 
     for round_no in range(1, 3):
-        for model in GEMINI_MODELS:
+        for model in models:
             for attempt in range(1, 3):
                 try:
                     print(f"Gemini: {model} (urinish {attempt}, davra {round_no})")
