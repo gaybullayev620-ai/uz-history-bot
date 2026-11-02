@@ -6,8 +6,13 @@ on:
   schedule:
     - cron: "0 6 * * *"
 
-  # Qo'lda ishga tushirish
+    # Qo'lda ishga tushirish
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Sinov rejimi: video yasaladi, Instagram'ga joylanmaydi"
+        type: boolean
+        default: false
 
 permissions:
   contents: write 
