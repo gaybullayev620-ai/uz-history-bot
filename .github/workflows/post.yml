@@ -51,7 +51,15 @@ jobs:
           UPLOAD_POST_USER: ${{ secrets.UPLOAD_POST_USER }}
         run: |
           python main.py
-
+      # 5b. Ishlatilgan mavzularni saqlash
+      - name: Save used topics
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add used_topics.json
+          git diff --staged --quiet || git commit -m "Update used topics"
+          git push
       # 6. Tayyor videolarni saqlash
       - name: Upload finished Reels
         if: always()
