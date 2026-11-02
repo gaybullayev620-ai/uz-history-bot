@@ -72,8 +72,7 @@ PIXABAY_URL = "https://pixabay.com/api/videos/"
 
 # Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
 # Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
-CF_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
-CF_ACCOUNT = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+
 
 CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 
@@ -102,7 +101,8 @@ def request_retry(method, url, tries=4, **kwargs):
         try:
             response = requests.request(
                 method,
-                url,
+CF_TOKEN = (os.getenv("CLOUDFLARE_API_TOKEN") or "").strip()
+CF_ACCOUNT = (os.getenv("CLOUDFLARE_ACCOUNT_ID") or "").strip()  url,
                 **kwargs
             )
 
