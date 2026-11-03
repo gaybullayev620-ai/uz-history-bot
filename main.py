@@ -73,6 +73,29 @@ PIXABAY_URL = "https://pixabay.com/api/videos/"
 # Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
 # Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
 
+PIXABAY_URL = "https://pixabay.com/api/videos/"
+
+# Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
+# Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
+
+PIXABAY_URL = "https://pixabay.com/api/videos/"
+
+# Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
+# Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
+CF_TOKEN = (os.getenv("CLOUDFLARE_API_TOKEN") or "").strip()
+CF_ACCOUNT = (os.getenv("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+
+CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+
+IMAGE_STYLE = (
+    "photorealistic, cinematic lighting, highly detailed, "
+    "vertical composition, no text, no letters, no watermark"
+
+CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+
+IMAGE_STYLE = (
+    "photorealistic, cinematic lighting, highly detailed, "
+    "vertical composition, no text, no letters, no watermark"
 
 CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 
