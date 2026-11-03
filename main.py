@@ -37,6 +37,13 @@ VOICE = "uz-UZ-SardorNeural"
 VOICE_RATE = "-3%"
 VOICE_PITCH = "-6Hz"
 
+# Gemini TTS (asosiy ovoz). Xato bo'lsa yuqoridagi Sardor ovozi ishlaydi.
+USE_GEMINI_TTS = True
+GEMINI_TTS_MODEL = "gemini-3.8-flash-tts"
+GEMINI_TTS_VOICE = "Bodi"
+# Bo'sh qoldirilsa, standart ovoz ishlatiladi (tavsiya etiladi).
+GEMINI_TTS_STYLE = ""
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE_DIR, "output")
 TEMP = os.path.join(OUT, "temp")
@@ -736,13 +743,122 @@ async def create_voice(text, path):
     await speaker.save(path)
 
 
+GEMINI_TTS_FAILS = 0
+
+
+def gemini_tts(text, path):
+    """
+    Gemini TTS bilan ovoz yaratadi (WAV).
+    Muvaffaqiyatli bo'lsa fayl yo'lini, aks holda None qaytaradi.
+    """
+    global GEMINI_TTS_FAILS
+
+    if not USE_GEMINI_TTS or GEMINI_TTS_FAILS >= 2:
+        return None
+
+    content = {
+        "type": "text",
+        "text": clean_voice_text(text),
+    }
+
+    if GEMINI_TTS_STYLE.strip():
+        content["annotations"] = [{
+            "type": "speech_metadata",
+            "style": GEMINI_TTS_STYLE.strip(),
+        }]
+
+    payload = {
+        "model": GEMINI_TTS_MODEL,
+        "input": [{
+            "type": "user_input",
+            "content": [content],
+        }],
+        "response_format": {"type": "audio"},
+        "generation_config": {
+            "speech_config": [
+                {"voice": GEMINI_TTS_VOICE}
+            ]
+        },
+    }
+
+    try:
+        response = request_retry(
+            "POST",
+            "https://generativelanguage.googleapis.com/v1beta/interactions",
+            tries=3,
+            headers={
+                "x-goog-api-key": GEMINI_KEY,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=(20, 180)
+        )
+
+        try:
+            if not response.ok:
+                raise RuntimeError(
+                    f"HTTP {response.status_code}: "
+                    f"{response.text[:300]}"
+                )
+
+            data = response.json()
+
+        finally:
+            response.close()
+
+        audio_b64 = None
+
+        for step in data.get("steps", []):
+            if step.get("type") != "model_output":
+                continue
+
+            for part in step.get("content", []):
+                if part.get("type") == "audio" and part.get("data"):
+                    audio_b64 = part["data"]
+
+        if not audio_b64:
+            raise RuntimeError(
+                f"Audio qaytmadi: {str(data)[:300]}"
+            )
+
+        wav_path = os.path.splitext(path)[0] + "_gemini.wav"
+
+        with open(wav_path, "wb") as f:
+            f.write(base64.b64decode(audio_b64))
+
+        if os.path.getsize(wav_path) < 2000:
+            raise RuntimeError("Audio fayli juda kichik.")
+
+        GEMINI_TTS_FAILS = 0
+        print("Gemini ovozi tayyor.")
+
+        time.sleep(1)
+
+        return wav_path
+
+    except Exception as error:
+        GEMINI_TTS_FAILS += 1
+        print(f"Gemini TTS xatosi: {error}")
+        print("Sardor ovoziga o'tildi.")
+        return None
+
+
 def synthesize_voice(text, path):
+    # 1) Asosiy: Gemini TTS
+    gemini_path = gemini_tts(text, path)
+
+    if gemini_path:
+        return gemini_path
+
+    # 2) Zaxira: edge-tts (Sardor)
     asyncio.run(
         create_voice(text, path)
     )
 
     if not os.path.exists(path):
         raise RuntimeError("Ovoz fayli yaratilmadi.")
+
+    return path
 
 
 # =========================================================
@@ -1092,7 +1208,7 @@ def build_scene(scene, index, total):
         f"voice_{index + 1}.mp3"
     )
 
-    synthesize_voice(
+    audio_path = synthesize_voice(
         text,
         audio_path
     )
