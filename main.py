@@ -90,7 +90,7 @@ CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 IMAGE_STYLE = (
     "photorealistic, cinematic lighting, highly detailed, "
     "vertical composition, no text, no letters, no watermark"
-
+) 
 CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 
 IMAGE_STYLE = (
