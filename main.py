@@ -1221,13 +1221,32 @@ def clean_temp():
 # 12. ASOSIY JARAYON
 # =========================================================
 
+def check_cloudflare():
+    print("\nCloudflare tekshiruvi:")
+    print("Token uzunligi:", len(CF_TOKEN))
+    print("Account ID uzunligi:", len(CF_ACCOUNT), "(32 bo'lishi kerak)")
+    print("Account ID da 'http' bormi:", "http" in CF_ACCOUNT.lower())
+
+    if not CF_TOKEN:
+        return
+
+    try:
+        r = requests.get(
+            "https://api.cloudflare.com/client/v4/user/tokens/verify",
+            headers={"Authorization": f"Bearer {CF_TOKEN}"},
+            timeout=30
+        )
+        print("Token verify:", r.status_code, r.text[:300])
+    except Exception as error:
+        print("Verify xatosi:", error)
+    
 def main():
     print("\n================================")
     print("PROFESSIONAL UZBEK REELS BOT")
     print("================================\n")
 
     clean_temp()
-
+    check_cloudflare()
     # Gemini ssenariy yaratadi
     data = generate_script()
 
