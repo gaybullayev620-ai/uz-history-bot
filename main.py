@@ -72,30 +72,8 @@ PIXABAY_URL = "https://pixabay.com/api/videos/"
 
 # Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
 # Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
-
-PIXABAY_URL = "https://pixabay.com/api/videos/"
-
-# Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
-# Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
-
-PIXABAY_URL = "https://pixabay.com/api/videos/"
-
-# Cloudflare Workers AI (FLUX.1 schnell) - tekin AI rasm yaratish.
-# Kalitlar bo'lmasa yoki xato bo'lsa, bot Pixabay videosiga o'tadi.
 CF_TOKEN = (os.getenv("CLOUDFLARE_API_TOKEN") or "").strip()
 CF_ACCOUNT = (os.getenv("CLOUDFLARE_ACCOUNT_ID") or "").strip()
-
-CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
-
-IMAGE_STYLE = (
-    "photorealistic, cinematic lighting, highly detailed, "
-    "vertical composition, no text, no letters, no watermark"
-) 
-CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
-
-IMAGE_STYLE = (
-    "photorealistic, cinematic lighting, highly detailed, "
-    "vertical composition, no text, no letters, no watermark"
 
 CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 
@@ -124,8 +102,7 @@ def request_retry(method, url, tries=4, **kwargs):
         try:
             response = requests.request(
                 method,
-CF_TOKEN = (os.getenv("CLOUDFLARE_API_TOKEN") or "").strip()
-CF_ACCOUNT = (os.getenv("CLOUDFLARE_ACCOUNT_ID") or "").strip()  url,
+                url,
                 **kwargs
             )
 
@@ -1240,10 +1217,6 @@ def clean_temp():
             pass
 
 
-# =========================================================
-# 12. ASOSIY JARAYON
-# =========================================================
-
 def check_cloudflare():
     print("\nCloudflare tekshiruvi:")
     print("Token uzunligi:", len(CF_TOKEN))
@@ -1262,7 +1235,12 @@ def check_cloudflare():
         print("Token verify:", r.status_code, r.text[:300])
     except Exception as error:
         print("Verify xatosi:", error)
-    
+
+
+# =========================================================
+# 12. ASOSIY JARAYON
+# =========================================================
+
 def main():
     print("\n================================")
     print("PROFESSIONAL UZBEK REELS BOT")
@@ -1270,6 +1248,7 @@ def main():
 
     clean_temp()
     check_cloudflare()
+
     # Gemini ssenariy yaratadi
     data = generate_script()
 
