@@ -8,6 +8,7 @@ import random
 import asyncio
 import traceback
 import textwrap
+import subprocess
 
 import requests
 import numpy as np
@@ -1023,7 +1024,43 @@ def make_overlay(text, scene_number, total_scenes, duration):
 # 8. VIDEO FORMATINI MOSLASH
 # =========================================================
 
+def strip_extra_streams(path):
+    """
+    Pixabay videolaridagi ortiqcha oqimlarni (timecode, data) olib
+    tashlaydi, faqat video qoladi. Xato bo'lsa, asl fayl qaytariladi.
+    """
+    try:
+        import imageio_ffmpeg
+
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        out = os.path.splitext(path)[0] + "_clean.mp4"
+
+        result = subprocess.run(
+            [
+                exe, "-y", "-i", path,
+                "-map", "0:v:0", "-c", "copy", "-an",
+                out
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=120
+        )
+
+        if (
+            result.returncode == 0
+            and os.path.exists(out)
+            and os.path.getsize(out) > 30000
+        ):
+            return out
+
+    except Exception as error:
+        print(f"Video tozalash xatosi: {error}")
+
+    return path
+
+
 def prepare_video(path, duration):
+    path = strip_extra_streams(path)
     clip = VideoFileClip(path)
 
     scale = max(
@@ -1239,15 +1276,33 @@ def build_scene(scene, index, total):
 
     # 2) Zaxira: Pixabay videosi
     if video is None:
-        video_path, source_url = get_video(
-            keywords,
-            index + 1
-        )
+        last_error = None
 
-        video = prepare_video(
-            video_path,
-            duration
-        )
+        for attempt in range(4):
+            try:
+                video_path, source_url = get_video(
+                    keywords,
+                    index + 1
+                )
+
+                video = prepare_video(
+                    video_path,
+                    duration
+                )
+                break
+
+            except Exception as error:
+                last_error = error
+                video = None
+                print(
+                    f"Video ishlamadi ({attempt + 1}/4): "
+                    f"{str(error)[:150]}"
+                )
+
+        if video is None:
+            raise RuntimeError(
+                f"Sahna uchun video topilmadi: {last_error}"
+            )
 
     overlay = make_overlay(
         text,
