@@ -1397,15 +1397,31 @@ def check_cloudflare():
     if not CF_TOKEN:
         return
 
+    headers = {"Authorization": f"Bearer {CF_TOKEN}"}
+    base = "https://api.cloudflare.com/client/v4"
+
+    # Hisob tokenlari (account-owned) uchun
+    if CF_ACCOUNT:
+        try:
+            r = requests.get(
+                f"{base}/accounts/{CF_ACCOUNT}/tokens/verify",
+                headers=headers,
+                timeout=30
+            )
+            print("Account verify:", r.status_code, r.text[:300])
+        except Exception as error:
+            print("Account verify xatosi:", error)
+
+    # Foydalanuvchi tokenlari (user) uchun
     try:
         r = requests.get(
-            "https://api.cloudflare.com/client/v4/user/tokens/verify",
-            headers={"Authorization": f"Bearer {CF_TOKEN}"},
+            f"{base}/user/tokens/verify",
+            headers=headers,
             timeout=30
         )
-        print("Token verify:", r.status_code, r.text[:300])
+        print("User verify:", r.status_code, r.text[:300])
     except Exception as error:
-        print("Verify xatosi:", error)
+        print("User verify xatosi:", error)
 
 
 # =========================================================
